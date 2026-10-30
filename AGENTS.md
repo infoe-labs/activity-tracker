@@ -3,8 +3,8 @@
 - Use Node 22.12+ and npm with the committed lockfile.
 - Preserve React/TypeScript, the local-first persistence contract, and subpath PWA support.
 - Never seed production tracking sessions or introduce telemetry, remote fonts, accounts or cloud sync without explicit authorization.
-- Store all timer operations immediately. Use atomic IndexedDB transactions, exact timestamps, and only one running session.
-- Reject overlaps with a visible recovery path; never silently trim history.
+- Store all timer operations immediately. Use atomic IndexedDB transactions, exact timestamps, and only one running personal focus session. Explicit AI agent sessions may run concurrently and must be accounted for separately.
+- Reject personal-focus overlaps with a visible recovery path; never silently trim history.
 - Schema/retention changes require a documented migration. Never clear unrelated origin storage or caches.
 - Keep icons, chart colors, safe areas, keyboard access, themes and reduced-motion behavior consistent.
 - Run npm test, npm run build and npm run test:e2e. Changes to paths, workers or manifests also require a non-root BASE_PATH build and offline browser test.

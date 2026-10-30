@@ -126,3 +126,26 @@ export function trendRows(data: ReturnType<typeof analyticsData>) {
   }
   return [...weeks.values()];
 }
+
+/** Parallel work occupies separate lanes instead of hiding underneath another block. */
+export function patternLanes(
+  sessions: Session[],
+  start: number,
+  end: number,
+  now: number,
+) {
+  const lanes: Session[][] = [];
+  for (const session of sessions
+    .filter((s) => s.start < end && (s.end ?? now) > start)
+    .sort((a, b) => a.start - b.start)) {
+    let lane = lanes.find(
+      (row) => (row[row.length - 1].end ?? now) <= session.start,
+    );
+    if (!lane) {
+      lane = [];
+      lanes.push(lane);
+    }
+    lane.push(session);
+  }
+  return lanes.length ? lanes : [[]];
+}

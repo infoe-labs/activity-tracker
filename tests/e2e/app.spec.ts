@@ -1,14 +1,40 @@
 import { test, expect } from "@playwright/test";
-test("one tap timers recover, switch and stop; analytics exports and presents", async ({
+test.beforeEach(async ({ page }) => {
+  await page.goto("./");
+  await expect(page.locator(".activity-button")).toHaveCount(0);
+  for (const name of ["Focus", "Study"]) {
+    await page
+      .getByRole("button", { name: "New activity", exact: true })
+      .click();
+    await page.getByLabel("Name", { exact: true }).fill(name);
+    await page
+      .getByRole("button", { name: "Save activity", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+});
+test("focus timers recover, switching is confirmed, and analytics exports", async ({
   page,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Job 1", exact: false }).click();
-  await expect(page.locator(".timer-identity h2")).toHaveText("Job 1");
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Focus/ })
+    .click();
+  await expect(page.locator(".timer-identity h2")).toHaveText("Focus");
   await page.reload();
-  await expect(page.locator(".timer-identity h2")).toHaveText("Job 1");
-  await page.getByRole("button", { name: "Job 2", exact: false }).click();
-  await expect(page.locator(".timer-identity h2")).toHaveText("Job 2");
+  await expect(page.locator(".timer-identity h2")).toHaveText("Focus");
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Study/ })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "Stop current activity and switch",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".timer-identity h2")).toHaveText("Study");
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator(".timer-identity h2")).toHaveText("What’s next?");
   await page
@@ -69,14 +95,17 @@ test("offline shell and active timer survive reload under deployment subpath", a
   context,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Job 1", exact: false }).click();
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Focus/ })
+    .click();
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
   await context.setOffline(true);
   await page.reload();
-  await expect(page.locator(".timer-identity h2")).toHaveText("Job 1");
+  await expect(page.locator(".timer-identity h2")).toHaveText("Focus");
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await page
     .locator(".bottom-nav")
@@ -91,7 +120,10 @@ test("notes-only edits preserve exact timer timestamps, including short sessions
   page,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Job 1", exact: false }).click();
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Focus/ })
+    .click();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   async function readSaved() {
     return page.evaluate(async () => {
@@ -130,7 +162,10 @@ test("all analytics filters can be reversed and every report exports", async ({
   page,
 }) => {
   await page.goto("./");
-  await page.getByRole("button", { name: "Job 1", exact: false }).click();
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Focus/ })
+    .click();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await page
     .locator(".bottom-nav")
@@ -184,13 +219,11 @@ test("backup restoration requires confirmation and replaces data atomically", as
       },
     ],
   };
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "backup.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(backup)),
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(backup)),
+  });
   await expect(page.getByRole("dialog")).toContainText(
     "Replace all current activities",
   );
@@ -204,4 +237,95 @@ test("backup restoration requires confirmation and replaces data atomically", as
   await expect(page.locator(".activity-button")).toContainText(
     "Restored focus",
   );
+});
+test("deleting tracking data leaves activities empty after reload", async ({
+  page,
+}) => {
+  await page
+    .locator(".bottom-nav")
+    .getByRole("button", { name: "Settings" })
+    .click();
+  await page.getByRole("button", { name: "Delete tracking data" }).click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.locator(".manage-activity")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".activity-button")).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Create your first activity" })
+    .click();
+  await page.getByLabel("Name", { exact: true }).fill("My choice");
+  await page
+    .getByRole("button", { name: "Save activity", exact: true })
+    .click();
+  await expect(page.locator(".activity-button")).toContainText("My choice");
+});
+test("hands off focus to a named agent, recovers both timers and stops independently", async ({
+  page,
+}) => {
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Focus/ })
+    .click();
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Study/ })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Would you like to stop Focus",
+  );
+  await page.getByLabel("Agent name optional").fill("Research helper");
+  await page
+    .getByRole("button", {
+      name: "Keep current activity running with AI",
+      exact: true,
+    })
+    .click();
+  await expect(page.locator(".timer-identity h2")).toHaveText("Study");
+  await expect(
+    page.getByRole("region", { name: "Running AI agents" }),
+  ).toContainText("Research helper");
+  await page.reload();
+  await expect(page.locator(".timer-identity h2")).toHaveText("Study");
+  await expect(page.locator(".agent-row")).toHaveCount(1);
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator(".agent-row")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "Stop AI agent for Focus", exact: true })
+    .click();
+  await expect(page.locator(".agent-row")).toHaveCount(0);
+  await page
+    .locator(".bottom-nav")
+    .getByRole("button", { name: "Analytics" })
+    .click();
+  await page.getByLabel("Analytics tracking mode").selectOption("agent");
+  await expect(page.locator(".analytics-stats")).toContainText(
+    "AI AGENT-HOURS",
+  );
+  await expect(
+    page.locator(".chart-section").first().locator(".analytics-legend"),
+  ).toContainText("Focus");
+});
+test("starts an agent alongside focus and switching can be cancelled", async ({
+  page,
+}) => {
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Focus/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Run Study with AI", exact: true })
+    .click();
+  await page.getByLabel("Agent name optional").fill("Side worker");
+  await page
+    .getByRole("button", { name: "Start AI timer", exact: true })
+    .click();
+  await expect(page.locator(".timer-identity h2")).toHaveText("Focus");
+  await expect(page.locator(".agent-row")).toContainText("Side worker");
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Study/ })
+    .click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.locator(".timer-identity h2")).toHaveText("Focus");
+  await expect(page.locator(".agent-row")).toHaveCount(1);
 });

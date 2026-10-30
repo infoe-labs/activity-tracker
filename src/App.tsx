@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowDown,
   BarChart3,
+  Bot,
   CalendarDays,
   Check,
   ChevronLeft,
@@ -30,7 +31,8 @@ import {
   clock,
   dateKey,
   dayStart,
-  defaults,
+  createActivity,
+  isAgent,
   duration,
   totals,
   validateBackup,
@@ -75,6 +77,29 @@ export default function App() {
       message: string;
       action: () => Promise<unknown>;
     } | null>(null);
+  const [pendingStart, setPendingStart] = useState<{
+    activityId: string;
+    kind: "switch" | "agent";
+    expectedFocusId?: string;
+  } | null>(null);
+  const [agentName, setAgentName] = useState("");
+  function requestStart(activityId: string, kind: "focus" | "agent" = "focus") {
+    setError("");
+    setAgentName("");
+    if (kind === "agent") {
+      setPendingStart({ activityId, kind: "agent" });
+      return;
+    }
+    if (active && active.activityId !== activityId) {
+      setPendingStart({
+        activityId,
+        kind: "switch",
+        expectedFocusId: active.id,
+      });
+      return;
+    }
+    void run(() => db.switchTo(activityId));
+  }
   const prefKey = JSON.stringify([
     "still-activity-tracker",
     import.meta.env.BASE_URL,
@@ -103,11 +128,6 @@ export default function App() {
       update: pwa.update,
     });
   useEffect(() => {
-    db.seed().catch(() =>
-      setError(
-        "Storage could not be opened. Check browser storage permissions.",
-      ),
-    );
     const t = setInterval(() => setNow(Date.now()), 1000);
     const vis = () => setNow(Date.now());
     document.addEventListener("visibilitychange", vis);
@@ -151,7 +171,7 @@ export default function App() {
       setBusy(false);
     }
   }
-  const active = sessions.find((s) => s.end === null),
+  const active = sessions.find((s) => s.end === null && !isAgent(s)),
     activeActivity = activities.find((a) => a.id === active?.activityId);
   const time = (t: number) =>
     new Date(t).toLocaleTimeString([], {
@@ -159,9 +179,15 @@ export default function App() {
       minute: "2-digit",
       hour12: !hour24,
     });
+  const agents = sessions.filter((s) => s.end === null && isAgent(s));
   const selectedDay = tab === "Today" ? dayStart(now) : date;
   const dayEnd = addDays(selectedDay, 1);
-  const daily = totals(sessions, selectedDay, dayEnd, now);
+  const daily = totals(
+    sessions.filter((s) => !isAgent(s)),
+    selectedDay,
+    dayEnd,
+    now,
+  );
   const total = [...daily.values()].reduce((sum, v) => sum + v.ms, 0);
   const visible = sessions.filter(
     (s) => s.start < dayEnd && (s.end ?? now) > selectedDay,
@@ -172,6 +198,10 @@ export default function App() {
       (a, b) => Number(b.favorite) - Number(a.favorite) || a.order - b.order,
     );
   function newSession() {
+    if (!activities.length) {
+      setActivityEditor(createActivity(0));
+      return;
+    }
     const start = tab === "History" ? selectedDay + 9 * 3600000 : now - 3600000;
     setEditor({
       id: crypto.randomUUID(),
@@ -203,9 +233,19 @@ export default function App() {
   async function csv() {
     const quote = (v: string) => '"' + v.replaceAll('"', '""') + '"';
     const rows = [
-      ["Activity", "Start", "End", "Duration seconds", "Notes"],
+      [
+        "Activity",
+        "Tracking mode",
+        "Agent",
+        "Start",
+        "End",
+        "Duration seconds",
+        "Notes",
+      ],
       ...sessions.map((s) => [
         activities.find((a) => a.id === s.activityId)?.name ?? "",
+        isAgent(s) ? "AI agent" : "Personal focus",
+        s.agentName ?? "",
         new Date(s.start).toISOString(),
         s.end ? new Date(s.end).toISOString() : "",
         String(Math.max(0, (s.end ?? now) - s.start) / 1000),
@@ -415,6 +455,57 @@ export default function App() {
                 </p>
               )}
             </section>
+            {agents.length > 0 && (
+              <section className="agent-panel" aria-label="Running AI agents">
+                <div className="section-heading">
+                  <h2>
+                    <Bot size={18} /> Working alongside you
+                  </h2>
+                  <span className="eyebrow">
+                    {agents.length} AI{" "}
+                    {agents.length === 1 ? "AGENT" : "AGENTS"}
+                  </span>
+                </div>
+                {agents.map((session) => {
+                  const activity = activities.find(
+                    (a) => a.id === session.activityId,
+                  );
+                  return (
+                    <div className="agent-row" key={session.id}>
+                      <span
+                        className="color-dot"
+                        style={{ background: activity?.color }}
+                      />
+                      <button
+                        className="agent-details"
+                        onClick={() => setEditor(session)}
+                      >
+                        <strong>{activity?.name}</strong>
+                        <small>
+                          {session.agentName || "AI agent"} · Started{" "}
+                          {time(session.start)} · Edit
+                        </small>
+                      </button>
+                      <span className="agent-duration">
+                        {clock(now - session.start)}
+                      </span>
+                      <button
+                        className="icon-button"
+                        aria-label={"Stop AI agent for " + activity?.name}
+                        disabled={busy}
+                        onClick={() => run(() => db.stopSession(session.id))}
+                      >
+                        <Square size={15} />
+                      </button>
+                    </div>
+                  );
+                })}
+                <p className="field-hint">
+                  Agent timers measure work running on your behalf, separately
+                  from your personal focus.
+                </p>
+              </section>
+            )}
             <div className="today-layout">
               <div className="tracking-column">
                 <section className="quick-section">
@@ -423,12 +514,7 @@ export default function App() {
                     <button
                       className="text-button"
                       onClick={() =>
-                        setActivityEditor({
-                          ...defaults[0],
-                          id: crypto.randomUUID(),
-                          name: "",
-                          order: activities.length,
-                        })
+                        setActivityEditor(createActivity(activities.length))
                       }
                     >
                       <Plus size={16} /> New activity
@@ -436,45 +522,63 @@ export default function App() {
                   </div>
                   <div className="activity-grid">
                     {quick.map((a) => (
-                      <button
-                        disabled={busy}
-                        key={a.id}
-                        style={colorStyle(a.color)}
-                        className={
-                          "activity-button " +
-                          (active?.activityId === a.id ? "active" : "")
-                        }
-                        onClick={() => run(() => db.switchTo(a.id))}
-                      >
-                        <span className="activity-icon">
-                          <ActivityIcon activity={a} />
-                        </span>
-                        <span className="activity-name">
-                          {a.name}
-                          <small>
-                            {duration(daily.get(a.id)?.ms ?? 0)} today
-                          </small>
-                        </span>
-                        {active?.activityId === a.id ? (
-                          <span className="equalizer">
-                            <i />
-                            <i />
-                            <i />
+                      <div className="activity-tile" key={a.id}>
+                        <button
+                          disabled={busy}
+                          style={colorStyle(a.color)}
+                          className={
+                            "activity-button " +
+                            (active?.activityId === a.id ? "active" : "")
+                          }
+                          onClick={() => requestStart(a.id)}
+                        >
+                          <span className="activity-icon">
+                            <ActivityIcon activity={a} />
                           </span>
-                        ) : (
-                          <Play className="activity-play" size={15} />
-                        )}
-                      </button>
+                          <span className="activity-name">
+                            {a.name}
+                            <small>
+                              {duration(daily.get(a.id)?.ms ?? 0)} today
+                            </small>
+                          </span>
+                          {active?.activityId === a.id ? (
+                            <span className="equalizer">
+                              <i />
+                              <i />
+                              <i />
+                            </span>
+                          ) : (
+                            <Play className="activity-play" size={15} />
+                          )}
+                        </button>
+                        <button
+                          className="agent-start"
+                          onClick={() => requestStart(a.id, "agent")}
+                          aria-label={"Run " + a.name + " with AI"}
+                        >
+                          <Bot size={14} /> Run with AI
+                        </button>
+                      </div>
                     ))}
                   </div>
                   {!quick.length && (
-                    <p className="empty">
-                      Create an activity to start making time.
-                    </p>
+                    <div className="activity-empty">
+                      <Leaf size={26} />
+                      <h3>Your time. Your activities.</h3>
+                      <p>Choose what you want to make time for.</p>
+                      <Button
+                        onClick={() =>
+                          setActivityEditor(createActivity(activities.length))
+                        }
+                      >
+                        Create your first activity
+                      </Button>
+                    </div>
                   )}
                   <p className="quiet-tip">
                     <span /> Switching activities automatically saves your
-                    current session.
+                    current focus. Choose whether to stop it or hand it to an AI
+                    agent.
                   </p>
                 </section>
                 <Timeline
@@ -493,7 +597,7 @@ export default function App() {
               <aside className="day-summary">
                 <div className="eyebrow">TODAY, SO FAR</div>
                 <h2>{duration(total)}</h2>
-                <p>of intentionally tracked time</p>
+                <p>of personal focus time</p>
                 <div className="distribution-bar">
                   {activities.map((a) => (
                     <span
@@ -613,12 +717,7 @@ export default function App() {
                 <button
                   className="text-button"
                   onClick={() =>
-                    setActivityEditor({
-                      ...defaults[0],
-                      id: crypto.randomUUID(),
-                      name: "",
-                      order: activities.length,
-                    })
+                    setActivityEditor(createActivity(activities.length))
                   }
                 >
                   <Plus size={17} /> Add activity
@@ -779,7 +878,6 @@ export default function App() {
                           async () => {
                             await db.sessions.clear();
                             await db.activities.clear();
-                            await db.activities.bulkAdd(defaults);
                           },
                         ),
                     })
@@ -850,6 +948,115 @@ export default function App() {
           );
         })}
       </nav>
+      {pendingStart && (
+        <Sheet
+          title={
+            pendingStart.kind === "switch"
+              ? "What happens to your current focus?"
+              : "Let an agent work alongside you"
+          }
+          onClose={() => setPendingStart(null)}
+        >
+          <p className="confirm-copy">
+            {pendingStart.kind === "switch"
+              ? `You’re starting ${activities.find((a) => a.id === pendingStart.activityId)?.name}. Would you like to stop ${activeActivity?.name}, or let an AI agent continue it?`
+              : `Track AI work on ${activities.find((a) => a.id === pendingStart.activityId)?.name} while your personal focus stays as it is.`}
+          </p>
+          <label>
+            Agent name <span className="muted">optional</span>
+            <input
+              maxLength={80}
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+              placeholder="Name this agent"
+            />
+          </label>
+          {pendingStart.kind === "switch" && (
+            <p className="field-hint">
+              Your personal session ends at the handoff. A separate agent timer
+              begins now, so earlier focus time stays yours.
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
+          <div className="start-options">
+            {pendingStart.kind === "switch" ? (
+              <>
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      await db.switchTo(pendingStart.activityId, Date.now(), {
+                        expectedFocusId: pendingStart.expectedFocusId,
+                      });
+                      setPendingStart(null);
+                    })
+                  }
+                >
+                  Stop current activity and switch
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      await db.switchTo(pendingStart.activityId, Date.now(), {
+                        keepAsAgent: true,
+                        agentName,
+                        expectedFocusId: pendingStart.expectedFocusId,
+                      });
+                      setPendingStart(null);
+                    })
+                  }
+                >
+                  <Bot size={17} /> Keep current activity running with AI
+                </Button>
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      await db.startAgent(
+                        pendingStart.activityId,
+                        Date.now(),
+                        agentName,
+                      );
+                      setPendingStart(null);
+                    })
+                  }
+                >
+                  Run the new activity with AI instead
+                </button>
+              </>
+            ) : (
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    await db.startAgent(
+                      pendingStart.activityId,
+                      Date.now(),
+                      agentName,
+                    );
+                    setPendingStart(null);
+                  })
+                }
+              >
+                <Bot size={17} /> Start AI timer
+              </Button>
+            )}
+            <button
+              className="secondary-button"
+              onClick={() => setPendingStart(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </Sheet>
+      )}
       {editor && (
         <SessionEditor
           error={error}
@@ -889,7 +1096,11 @@ export default function App() {
           }
           onArchive={() =>
             run(async () => {
-              if (active?.activityId === activityEditor.id)
+              if (
+                sessions.some(
+                  (s) => s.end === null && s.activityId === activityEditor.id,
+                )
+              )
                 throw Error("Stop this activity before archiving it.");
               await db.activities.update(activityEditor.id, {
                 archived: !activityEditor.archived,

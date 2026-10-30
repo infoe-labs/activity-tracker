@@ -13,6 +13,8 @@ export interface Session {
   start: number;
   end: number | null;
   notes: string;
+  mode?: "focus" | "agent";
+  agentName?: string;
 }
 export const palette = [
   "#6366F1",
@@ -24,33 +26,17 @@ export const palette = [
   "#EC4899",
   "#64748B",
 ];
-export const defaults: Activity[] = [
-  "Job 1",
-  "Job 2",
-  "Startup Idea",
-  "Break",
-  "Lunch",
-  "Exercise",
-  "Personal",
-  "Sleep",
-].map((name, i) => ({
-  id: "activity-" + i,
-  name,
-  color: palette[i],
-  icon: [
-    "briefcase",
-    "laptop",
-    "sparkles",
-    "coffee",
-    "utensils",
-    "heart",
-    "user",
-    "moon",
-  ][i],
-  order: i,
-  archived: false,
-  favorite: false,
-}));
+export function createActivity(order: number): Activity {
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    color: palette[order % palette.length],
+    icon: "leaf",
+    order,
+    archived: false,
+    favorite: false,
+  };
+}
 export const duration = (ms: number) => {
   const m = Math.floor(Math.max(0, ms) / 60000);
   if (ms > 0 && m === 0) return "<1m";
@@ -81,7 +67,15 @@ export const localInput = (t: number) =>
 export function overlap(a: Session, b: Session, now = Date.now()) {
   return a.id !== b.id && a.start < (b.end ?? now) && (a.end ?? now) > b.start;
 }
+export const isAgent = (session: Session) => session.mode === "agent";
 export function validateSession(s: Session) {
+  if (s.mode !== undefined && s.mode !== "focus" && s.mode !== "agent")
+    throw Error("Invalid tracking mode.");
+  if (
+    s.agentName !== undefined &&
+    (typeof s.agentName !== "string" || s.agentName.length > 80)
+  )
+    throw Error("Agent names must be 80 characters or fewer.");
   if (
     !Number.isFinite(s.start) ||
     s.start < 0 ||
@@ -162,10 +156,13 @@ export function validateBackup(value: unknown): {
       throw Error("Invalid session in backup.");
     validateSession(s);
     sid.add(s.id);
-    if (s.end === null) active++;
+    if (s.end === null && !isAgent(s)) active++;
   }
-  if (active > 1) throw Error("Backup has more than one running timer.");
-  const sorted = [...v.sessions].sort((a, b) => a.start - b.start);
+  if (active > 1)
+    throw Error("Backup has more than one running personal focus timer.");
+  const sorted = v.sessions
+    .filter((s) => !isAgent(s))
+    .sort((a, b) => a.start - b.start);
   for (let i = 1; i < sorted.length; i++)
     if ((sorted[i - 1].end ?? Infinity) > sorted[i].start)
       throw Error(
