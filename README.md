@@ -30,11 +30,11 @@ Build output is in **dist/**. Only deploy that directory.
 
 ```sh
 npm test
-npx playwright install chromium
+npx playwright install --with-deps chromium webkit
 npm run test:e2e
 ```
 
-Browser tests use the production build on port 4173. Build first.
+Browser tests use the production build on port 4187. Build first.
 To test deployment under a repository subpath:
 
 ```sh
@@ -197,3 +197,9 @@ To start with an empty list without losing history, use **Settings → Your acti
 → Clear activity list**. Unused activities are deleted, referenced activities are
 archived, and running timers are preserved. Archived activities are hidden by
 default in Settings; use **Show archived activities** to inspect or restore them.
+
+Mobile layout checks run in Chromium and WebKit. Pages, sheets and chart reports
+keep at least 24px horizontal gutters, including touch-device landscape layouts.
+Safe-area calculations have fallbacks, and mobile text inputs use at least 16px
+type to avoid iPhone focus zoom while preserving user pinch-to-zoom. Browser
+emulation does not substitute for checking the installed app on a real iPhone.
