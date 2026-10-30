@@ -384,3 +384,22 @@ describe("parallel accounting and backup", () => {
     expect(rows[0]).toHaveLength(2);
   });
 });
+
+describe("clearing the activity list", () => {
+  it("removes unused choices, archives referenced choices and retains timers/history", async () => {
+    await db.switchTo(defaults[0].id, 1000);
+    await db.clearActivityList();
+    expect(
+      (await db.activities.toArray()).filter((a) => !a.archived),
+    ).toHaveLength(0);
+    expect(await db.activities.count()).toBe(1);
+    expect((await db.sessions.toArray())[0]).toMatchObject({
+      activityId: defaults[0].id,
+      start: 1000,
+      end: null,
+    });
+    await db.switchTo(null, 2000);
+    expect((await db.sessions.toArray())[0].end).toBe(2000);
+    expect((await db.activities.get(defaults[0].id))?.archived).toBe(true);
+  });
+});

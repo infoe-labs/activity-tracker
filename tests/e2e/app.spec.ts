@@ -329,3 +329,38 @@ test("starts an agent alongside focus and switching can be cancelled", async ({
   await expect(page.locator(".timer-identity h2")).toHaveText("Focus");
   await expect(page.locator(".agent-row")).toHaveCount(1);
 });
+test("clear activity list hides presets and custom choices without deleting history", async ({
+  page,
+}) => {
+  await page
+    .locator(".activity-grid")
+    .getByRole("button", { name: /^Focus/ })
+    .click();
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await page
+    .locator(".bottom-nav")
+    .getByRole("button", { name: "Settings" })
+    .click();
+  await page
+    .getByRole("button", { name: "Clear activity list", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.locator(".manage-activity")).toHaveCount(0);
+  await expect(
+    page.getByText("No active activities. Add only what you want to track."),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Show archived activities (1)", exact: true })
+    .click();
+  await expect(page.locator(".manage-activity")).toHaveCount(1);
+  await expect(page.locator(".manage-activity")).toContainText("Focus");
+  await page
+    .locator(".bottom-nav")
+    .getByRole("button", { name: "Today", exact: true })
+    .click();
+  await expect(page.locator(".activity-button")).toHaveCount(0);
+  await expect(page.locator(".timeline-row")).toHaveCount(1);
+  await page.reload();
+  await expect(page.locator(".activity-button")).toHaveCount(0);
+  await expect(page.locator(".timeline-row")).toHaveCount(1);
+});

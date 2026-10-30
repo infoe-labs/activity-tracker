@@ -77,6 +77,7 @@ export default function App() {
       message: string;
       action: () => Promise<unknown>;
     } | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [pendingStart, setPendingStart] = useState<{
     activityId: string;
     kind: "switch" | "agent";
@@ -724,56 +725,85 @@ export default function App() {
                   <Plus size={17} /> Add activity
                 </button>
               </div>
-              {activities.map((a, i) => (
-                <div
-                  className="manage-activity"
-                  key={a.id}
-                  style={colorStyle(a.color)}
+              {activities
+                .filter((a) => showArchived || !a.archived)
+                .map((a, i) => (
+                  <div
+                    className="manage-activity"
+                    key={a.id}
+                    style={colorStyle(a.color)}
+                  >
+                    <button
+                      className="manage-name"
+                      onClick={() => setActivityEditor(a)}
+                    >
+                      <span className="activity-icon">
+                        <ActivityIcon activity={a} />
+                      </span>
+                      <span>
+                        {a.name}
+                        {a.archived && <small>Archived</small>}
+                      </span>
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label={"Favorite " + a.name}
+                      onClick={() =>
+                        run(() =>
+                          db.activities.update(a.id, { favorite: !a.favorite }),
+                        )
+                      }
+                    >
+                      <Star
+                        size={16}
+                        fill={a.favorite ? "currentColor" : "none"}
+                      />
+                    </button>
+                    <button
+                      className="icon-button"
+                      disabled={i === 0}
+                      aria-label={"Move " + a.name + " up"}
+                      onClick={() => run(() => reorder(a, -1))}
+                    >
+                      <ArrowUp size={16} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      disabled={i === activities.length - 1}
+                      aria-label={"Move " + a.name + " down"}
+                      onClick={() => run(() => reorder(a, 1))}
+                    >
+                      <ArrowDown size={16} />
+                    </button>
+                  </div>
+                ))}
+              {!activities.some((a) => !a.archived) && (
+                <p className="muted activity-list-empty">
+                  No active activities. Add only what you want to track.
+                </p>
+              )}
+              {activities.some((a) => a.archived) && (
+                <button
+                  className="text-button"
+                  onClick={() => setShowArchived(!showArchived)}
                 >
-                  <button
-                    className="manage-name"
-                    onClick={() => setActivityEditor(a)}
-                  >
-                    <span className="activity-icon">
-                      <ActivityIcon activity={a} />
-                    </span>
-                    <span>
-                      {a.name}
-                      {a.archived && <small>Archived</small>}
-                    </span>
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={"Favorite " + a.name}
-                    onClick={() =>
-                      run(() =>
-                        db.activities.update(a.id, { favorite: !a.favorite }),
-                      )
-                    }
-                  >
-                    <Star
-                      size={16}
-                      fill={a.favorite ? "currentColor" : "none"}
-                    />
-                  </button>
-                  <button
-                    className="icon-button"
-                    disabled={i === 0}
-                    aria-label={"Move " + a.name + " up"}
-                    onClick={() => run(() => reorder(a, -1))}
-                  >
-                    <ArrowUp size={16} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    disabled={i === activities.length - 1}
-                    aria-label={"Move " + a.name + " down"}
-                    onClick={() => run(() => reorder(a, 1))}
-                  >
-                    <ArrowDown size={16} />
-                  </button>
-                </div>
-              ))}
+                  {showArchived ? "Hide" : "Show"} archived activities (
+                  {activities.filter((a) => a.archived).length})
+                </button>
+              )}
+              <button
+                className="setting-action danger"
+                disabled={!activities.some((a) => !a.archived)}
+                onClick={() =>
+                  setConfirm({
+                    message:
+                      "Clear the activity list? Unused activities will be deleted. Activities with recorded sessions will be archived. Your history and running timers will be kept.",
+                    action: () => db.clearActivityList(),
+                  })
+                }
+              >
+                <Trash2 size={17} /> Clear activity list
+              </button>
             </section>
             <div>
               <section className="settings-section">
