@@ -28,12 +28,16 @@ export function SessionEditor({
       session.end === null ? "" : localInput(session.end),
     ),
     [notes, setNotes] = useState(session.notes),
-    [formError, setFormError] = useState("");
+    [formError, setFormError] = useState(""),
+    [mode, setMode] = useState<"focus" | "agent">(session.mode ?? "focus"),
+    [agentName, setAgentName] = useState(session.agentName ?? "");
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const s = {
       ...session,
       activityId,
+      mode,
+      agentName: mode === "agent" ? agentName.trim() : undefined,
       start:
         start === localInput(session.start) ? session.start : +new Date(start),
       end: end
@@ -70,6 +74,26 @@ export function SessionEditor({
             ))}
           </select>
         </label>
+        <label>
+          Tracked by
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "focus" | "agent")}
+          >
+            <option value="focus">Me · personal focus</option>
+            <option value="agent">AI agent · parallel work</option>
+          </select>
+        </label>
+        {mode === "agent" && (
+          <label>
+            Agent name <span className="muted">optional</span>
+            <input
+              maxLength={80}
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value)}
+            />
+          </label>
+        )}
         <label>
           Started
           <input
@@ -110,7 +134,8 @@ export function SessionEditor({
         )}
         <p className="field-hint">
           For overnight sessions, choose the following day as the end date.
-          Overlapping entries must be adjusted before saving.
+          Personal-focus entries cannot overlap. AI agent work may run alongside
+          other sessions.
         </p>
         <label>
           Notes <span className="muted">optional</span>

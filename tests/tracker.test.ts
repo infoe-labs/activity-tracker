@@ -1,3 +1,4 @@
+import { defaults } from "./fixtures";
 import "fake-indexeddb/auto";
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -5,7 +6,6 @@ import { TrackerDB } from "../src/lib/db";
 import {
   addDays,
   dayStart,
-  defaults,
   totals,
   validateBackup,
   type Session,
@@ -16,7 +16,7 @@ if (!globalThis.crypto)
 let db: TrackerDB;
 beforeEach(async () => {
   db = new TrackerDB("test-" + crypto.randomUUID());
-  await db.seed();
+  await db.activities.bulkAdd(defaults);
 });
 afterEach(async () => {
   await db.delete();
@@ -185,5 +185,202 @@ describe("local-day analytics", () => {
     const month = period("This month", now);
     expect(new Date(month[0]).getDate()).toBe(1);
     expect(new Date(month[1]).getMonth()).toBe(10);
+  });
+});
+
+describe("user-defined activity initialization", () => {
+  it("starts empty and stays empty when reopened", async () => {
+    const name = "empty-" + crypto.randomUUID();
+    const fresh = new TrackerDB(name);
+    expect(await fresh.activities.count()).toBe(0);
+    fresh.close();
+    const reopened = new TrackerDB(name);
+    expect(await reopened.activities.count()).toBe(0);
+    await reopened.delete();
+  });
+  it("migrates unused presets, preserves history, and retains user changes", async () => {
+    const { default: Dexie } = await import("dexie");
+    const name = "legacy-" + crypto.randomUUID();
+    const old = new Dexie(name);
+    old
+      .version(1)
+      .stores({ activities: "id,order", sessions: "id,activityId,start" });
+    const legacy = [
+      {
+        id: "activity-0",
+        name: "Job 1",
+        color: "#6366F1",
+        icon: "briefcase",
+        order: 0,
+        archived: false,
+        favorite: false,
+      },
+      {
+        id: "activity-1",
+        name: "Job 2",
+        color: "#0EA5E9",
+        icon: "laptop",
+        order: 1,
+        archived: false,
+        favorite: false,
+      },
+      {
+        id: "activity-2",
+        name: "My own project",
+        color: "#A855F7",
+        icon: "sparkles",
+        order: 2,
+        archived: false,
+        favorite: false,
+      },
+      {
+        id: "custom",
+        name: "Custom activity",
+        color: "#6366F1",
+        icon: "leaf",
+        order: 3,
+        archived: false,
+        favorite: false,
+      },
+    ];
+    const running = {
+      id: "running",
+      activityId: "activity-1",
+      start: 1000,
+      end: null,
+      notes: "",
+    };
+    await old.table("activities").bulkAdd(legacy);
+    await old.table("sessions").add(running);
+    old.close();
+    const upgraded = new TrackerDB(name);
+    expect(await upgraded.activities.get("activity-0")).toBeUndefined();
+    expect((await upgraded.activities.get("activity-1"))?.archived).toBe(true);
+    expect((await upgraded.activities.get("activity-2"))?.name).toBe(
+      "My own project",
+    );
+    expect(await upgraded.activities.get("custom")).toEqual(legacy[3]);
+    expect(await upgraded.sessions.get("running")).toEqual(running);
+    await upgraded.activities.clear();
+    upgraded.close();
+    const reopened = new TrackerDB(name);
+    expect(await reopened.activities.count()).toBe(0);
+    await reopened.delete();
+  });
+});
+
+describe("parallel AI work", () => {
+  it("hands off at one timestamp without reclassifying earlier focus", async () => {
+    await db.switchTo(defaults[0].id, 1000);
+    const original = (await db.sessions.toArray())[0];
+    await db.switchTo(defaults[1].id, 3000, {
+      keepAsAgent: true,
+      agentName: "Helper",
+      expectedFocusId: original.id,
+    });
+    const rows = await db.sessions.toArray();
+    expect(rows.find((s) => s.id === original.id)?.end).toBe(3000);
+    expect(rows.find((s) => s.mode === "agent")).toMatchObject({
+      activityId: defaults[0].id,
+      start: 3000,
+      end: null,
+      agentName: "Helper",
+    });
+    expect(
+      rows.filter((s) => s.end === null && s.mode !== "agent"),
+    ).toHaveLength(1);
+  });
+  it("keeps independent agents running when focus stops and survives recovery", async () => {
+    await db.switchTo(defaults[0].id, 1000);
+    await Promise.all([
+      db.startAgent(defaults[1].id, 1500, "One"),
+      db.startAgent(defaults[1].id, 1500, "Two"),
+    ]);
+    await db.startAgent(defaults[1].id, 1500, "One");
+    await db.switchTo(null, 2000);
+    const second = new TrackerDB(db.name);
+    const agents = (await second.sessions.toArray()).filter(
+      (s) => s.mode === "agent" && s.end === null,
+    );
+    expect(agents).toHaveLength(2);
+    second.close();
+    await db.stopSession(agents[0].id, 2500);
+    expect(
+      (await db.sessions.toArray()).filter(
+        (s) => s.mode === "agent" && s.end === null,
+      ),
+    ).toHaveLength(1);
+  });
+  it("permits explicit agent overlaps while rejecting personal overlaps", async () => {
+    await db.saveSession(session(1000, 4000));
+    const agent = {
+      ...session(2000, 5000),
+      mode: "agent" as const,
+      agentName: "Assistant",
+    };
+    await db.saveSession(agent);
+    await expect(db.saveSession(session(2000, 3000))).rejects.toThrow(
+      "overlaps",
+    );
+    expect(
+      validateBackup({
+        version: 1,
+        activities: defaults,
+        sessions: await db.sessions.toArray(),
+      }).sessions,
+    ).toHaveLength(2);
+  });
+  it("rejects stale handoff decisions atomically", async () => {
+    await db.switchTo(defaults[0].id, 1000);
+    const original = (await db.sessions.toArray())[0];
+    await db.switchTo(defaults[1].id, 2000);
+    await expect(
+      db.switchTo(defaults[2].id, 3000, {
+        keepAsAgent: true,
+        expectedFocusId: original.id,
+      }),
+    ).rejects.toThrow("another tab");
+    expect((await db.sessions.toArray()).some((s) => s.mode === "agent")).toBe(
+      false,
+    );
+  });
+});
+
+describe("parallel accounting and backup", () => {
+  it("restores a personal timer and multiple agent timers without stopping any", async () => {
+    const sessions = [
+      { ...session(1000, null), mode: "focus" as const },
+      { ...session(1500, null), mode: "agent" as const, agentName: "One" },
+      { ...session(1500, null), mode: "agent" as const, agentName: "Two" },
+    ];
+    await db.restore({ version: 1, activities: defaults, sessions });
+    expect(
+      (await db.sessions.toArray()).filter((s) => s.end === null),
+    ).toHaveLength(3);
+    const personal = totals(
+      sessions.filter((s) => s.mode === "focus"),
+      0,
+      10000,
+      5000,
+    );
+    const agents = totals(
+      sessions.filter((s) => s.mode === "agent"),
+      0,
+      10000,
+      5000,
+    );
+    expect(personal.get(defaults[0].id)?.ms).toBe(4000);
+    expect(agents.get(defaults[0].id)?.ms).toBe(7000);
+  });
+  it("places concurrent blocks in different pattern lanes", async () => {
+    const { patternLanes } = await import("../src/lib/analytics");
+    const rows = patternLanes(
+      [session(1000, 4000), session(2000, 3000), session(4000, 5000)],
+      0,
+      10000,
+      10000,
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveLength(2);
   });
 });

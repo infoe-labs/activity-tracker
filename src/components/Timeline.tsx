@@ -1,5 +1,5 @@
 import { CalendarDays, MoreHorizontal, Plus } from "lucide-react";
-import { duration, type Session, type Activity } from "../lib/model";
+import { isAgent, duration, type Session, type Activity } from "../lib/model";
 const colorStyle = (color: string) =>
   ({ "--activity": color }) as import("react").CSSProperties;
 export function Timeline({
@@ -45,8 +45,13 @@ export function Timeline({
         <div className="timeline">
           {chronological.map((s, i) => {
             const a = activities.find((a) => a.id === s.activityId);
-            const prev = chronological[i - 1];
-            const gap = prev ? s.start - (prev.end ?? now) : 0;
+            const previousEnd = Math.max(
+              selectedDay,
+              ...chronological
+                .slice(0, i)
+                .map((previous) => previous.end ?? now),
+            );
+            const gap = i ? s.start - previousEnd : 0;
             return (
               <div key={s.id}>
                 {gap >= 60000 && (
@@ -70,6 +75,11 @@ export function Timeline({
                   <span className="timeline-marker" />
                   <span className="timeline-activity">
                     <strong>{a?.name ?? "Archived activity"}</strong>
+                    {isAgent(s) && (
+                      <span className="agent-badge">
+                        AI{s.agentName ? " · " + s.agentName : " agent"}
+                      </span>
+                    )}
                     <small>
                       {s.notes ||
                         (s.end === null
@@ -111,29 +121,48 @@ export function DayStrip({
   end: number;
   now: number;
 }) {
+  const groups = [
+    { label: "Personal focus", sessions: sessions.filter((s) => !isAgent(s)) },
+    ...sessions
+      .filter(isAgent)
+      .map((s) => ({
+        label:
+          (s.agentName || "AI agent") +
+          " · " +
+          (activities.find((a) => a.id === s.activityId)?.name ?? "Activity"),
+        sessions: [s],
+      })),
+  ];
   return (
     <section className="day-strip">
       <div className="eyebrow">YOUR DAY AT A GLANCE</div>
-      <div className="day-strip-track">
-        {sessions.map((s) => (
-          <span
-            key={s.id}
-            title={activities.find((a) => a.id === s.activityId)?.name}
-            style={{
-              background: activities.find((a) => a.id === s.activityId)?.color,
-              left: Math.max(0, (s.start - start) / (end - start)) * 100 + "%",
-              width:
-                Math.max(
-                  0,
-                  (Math.min(s.end ?? now, end) - Math.max(s.start, start)) /
-                    (end - start),
-                ) *
-                  100 +
-                "%",
-            }}
-          />
-        ))}
-      </div>
+      {groups.map((group, i) => (
+        <div key={i}>
+          <p className="day-lane-label">{group.label}</p>
+          <div className="day-strip-track">
+            {group.sessions.map((s) => (
+              <span
+                key={s.id}
+                title={activities.find((a) => a.id === s.activityId)?.name}
+                style={{
+                  background: activities.find((a) => a.id === s.activityId)
+                    ?.color,
+                  left:
+                    Math.max(0, (s.start - start) / (end - start)) * 100 + "%",
+                  width:
+                    Math.max(
+                      0,
+                      (Math.min(s.end ?? now, end) - Math.max(s.start, start)) /
+                        (end - start),
+                    ) *
+                      100 +
+                    "%",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
       <div className="day-strip-labels">
         <span>12am</span>
         <span>6am</span>

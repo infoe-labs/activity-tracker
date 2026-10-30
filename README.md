@@ -1,7 +1,8 @@
+**Live app: [https://infoe-labs.github.io/activity-tracker/](https://infoe-labs.github.io/activity-tracker/)**
+
 # Still — Time well spent
 
-A calm, mobile-first productivity activity tracker. Start with one tap, switch
-without stopping, and see where your time goes. No account or backend required.
+A calm, mobile-first productivity activity tracker. Start with one tap, choose how to switch, and see where your time goes. No account or backend required.
 
 Built with React, strict TypeScript, Vite, Tailwind CSS v4, shadcn/ui buttons and accessible Radix
 dialog primitives, Lucide, Dexie/IndexedDB, Recharts and vite-plugin-pwa.
@@ -48,8 +49,10 @@ manual edits, export, presentation and offline reload.
 
 ## Using Still
 
-- **Today:** tap an activity to start; tap a different one to save and switch at
-  the exact same timestamp. Repeated taps on the running activity do nothing.
+- **Today:** create your own activities. Tap to start personal focus. When
+  switching, choose to stop the previous activity or hand it to an AI agent.
+  Repeated taps on the running personal activity do nothing. Each activity also
+  has **Run with AI** for a separate, optionally named agent timer.
 - **Log time:** enter local start/end dates and times. Overnight sessions use
   the following date for the end. Duration can also be adjusted in minutes.
 - **History:** choose a day, inspect time blocks and gaps, and tap entries to edit.
@@ -58,7 +61,7 @@ manual edits, export, presentation and offline reload.
 - **Settings:** customize names, colors, icons, favorites and order; archive
   activities; change theme/time format; export or restore data.
 
-Conflicting sessions are rejected with a clear explanation. Adjust the proposed
+Conflicting personal-focus sessions are rejected with a clear explanation. Adjust the proposed
 times or edit/delete the conflicting historical entry first. No history is
 silently trimmed. Future manual entries are rejected. Destructive changes require
 confirmation. Activities with historical sessions are archived instead of removed.
@@ -67,14 +70,14 @@ confirmation. Activities with historical sessions are archived instead of remove
 
 Distribution (pie/donut), daily stacked bars, trends, time-of-day patterns and
 activity ranking all use actual IndexedDB sessions, including a running timer.
-No demo sessions are seeded. Excluding activities recalculates percentages using
+No activities or demo sessions are seeded. Create your own activities on first use. Excluding activities recalculates percentages using
 only included tracked time. Averages include all days in the selected range.
 
 Durations are timestamp differences, clipped to range boundaries and split at
 local calendar midnights. Daylight-saving days may contain 23 or 25 hours. The
 current device timezone determines day boundaries; stored instants never change.
 Native local-time inputs use the browser's interpretation of a repeated DST hour.
-Overlapping intervals are prevented on save and rejected on restore.
+Personal-focus overlaps are prevented on save and rejected on restore. Explicit agent sessions may overlap.
 
 Presentation mode hides navigation and unrelated controls. PNG reports are composed
 locally with Canvas, separately from the UI, at 1080×1920, 1080×1080 or 1920×1080.
@@ -94,8 +97,7 @@ conversion before deleting old records; unsupported backup versions are rejected
 **Browser storage can be cleared or evicted. Keep JSON backups.** Settings offers
 validated JSON export/atomic restore, CSV export, optional persistent-storage
 permission and confirmed tracking-data deletion. Persistent-storage permission
-is not a backup. Deletion clears only this app's tracking tables and restores
-default activities; it preserves preferences, app assets and unrelated apps.
+is not a backup. Deletion clears only this app's tracking tables and leaves an empty activity list; it preserves preferences, app assets and unrelated apps.
 
 JSON includes activities, notes, timestamps and the active session. CSV includes
 timestamps, duration in seconds and notes, with spreadsheet-formula escaping.
@@ -164,3 +166,29 @@ to deployment. Do not weaken existing rules to enable publishing.
 | scripts/generate-icons.py                     | Optional icon regeneration using Pillow         |
 
 No paid services, database server or backend are required.
+
+### Removing presets from earlier installations
+
+IndexedDB schema version 2 performs a one-time atomic migration in the existing
+tracking namespace. Unchanged bundled activities are deleted if unused, or archived
+if referenced by sessions (including a running timer). Session records are never
+deleted. Renamed, recolored, reordered, favorited, archived, and user-created
+activities are preserved. JSON backup format remains version 1. Empty lists stay
+empty after reload, restore, and tracking-data deletion.
+
+### Personal focus and AI agent work
+
+One personal focus timer and multiple named AI timers can run concurrently.
+A handoff atomically closes the personal session, starts an agent session for
+that activity, and begins the next personal session at one timestamp. Earlier
+personal time is never relabeled as agent time. Stopping personal focus does
+not stop agents; each agent can be stopped or edited independently. These are
+manual tracking timers: Still does not launch agents or infer their completion.
+
+Analytics defaults to **My personal focus**. Choose **AI agent work** to review
+agent-hours, or **Combined effort** to sum both. Parallel agent sessions add
+agent-hours, so combined effort can exceed elapsed calendar time. Percentages
+use included effort in the selected mode. PNGs identify the accounting mode;
+JSON preserves mode/name metadata and CSV includes tracking-mode/agent columns.
+Older sessions without a mode remain personal focus. Backup schema version 1
+adds optional mode and agentName fields; readers validate both when present.

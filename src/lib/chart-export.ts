@@ -1,9 +1,15 @@
-import { type analyticsData, type ChartKind, chartTitles } from "./analytics";
+import {
+  type analyticsData,
+  type ChartKind,
+  chartTitles,
+  patternLanes,
+} from "./analytics";
 import { addDays, duration, type Session } from "./model";
 type ExportOptions = {
   kind: ChartKind;
   data: ReturnType<typeof analyticsData>;
   sessions: Session[];
+  scopeLabel?: string;
   start: number;
   end: number;
   now: number;
@@ -16,6 +22,21 @@ export async function exportChart(o: ExportOptions): Promise<Blob> {
   const { kind, data, label, footer } = o;
   const width = o.format === "landscape" ? 1920 : 1080;
   const baseHeight = o.format === "portrait" ? 1920 : 1080;
+  const patternDays = data.days.map((day) => ({
+    ...day,
+    lanes: patternLanes(
+      o.sessions.filter((s) =>
+        data.included.some((a) => a.id === s.activityId),
+      ),
+      day.timestamp,
+      addDays(day.timestamp, 1),
+      o.now,
+    ),
+  }));
+  const patternHeight = patternDays.reduce(
+    (height, day) => height + day.lanes.length * 28 + 10,
+    0,
+  );
   // Long legends and date ranges grow the report rather than silently cropping it.
   const height =
     Math.max(
@@ -26,7 +47,7 @@ export async function exportChart(o: ExportOptions): Promise<Blob> {
       kind === "ranking"
         ? 420 + data.entries.length * 115
         : kind === "patterns"
-          ? 640 + data.days.length * 34
+          ? 640 + patternHeight + Math.ceil(data.entries.length / 3) * 75
           : kind === "distribution"
             ? (o.format === "square" ? 760 : 1160) +
               Math.ceil(data.entries.length / (width > 1080 ? 3 : 2)) * 75
@@ -75,6 +96,7 @@ export async function exportChart(o: ExportOptions): Promise<Blob> {
   text("A LITTLE TIME, WELL SPENT", pad, 95, 20, "#6d7a70", 600);
   text(chartTitles[kind], pad, 165, width > 1080 ? 64 : 49, "#263b30", 600);
   text(label, pad, 215, 26, "#788079");
+  text(o.scopeLabel ?? "Personal focus", pad, 255, 20, "#788079");
   let legendY = 0;
   if (kind === "distribution") {
     const available =
@@ -102,7 +124,14 @@ export async function exportChart(o: ExportOptions): Promise<Blob> {
       ctx.fillStyle = "#f8f7f3";
       ctx.fill();
       ctx.textAlign = "center";
-      text("TRACKED TIME", cx, cy - 45, 20, "#788079", 600);
+      text(
+        (o.scopeLabel ?? "Personal focus").toUpperCase(),
+        cx,
+        cy - 45,
+        20,
+        "#788079",
+        600,
+      );
       text(
         duration(data.total),
         cx,
@@ -239,27 +268,21 @@ export async function exportChart(o: ExportOptions): Promise<Blob> {
         "#788079",
       ),
     );
-    data.days.forEach((day, i) => {
+    let y = 410;
+    patternDays.forEach((day) => {
       const t = day.timestamp,
-        end = addDays(t, 1),
-        y = 410 + i * 34;
-      ctx.fillStyle = "#e9eae4";
-      ctx.fillRect(x, y, w, 23);
+        end = addDays(t, 1);
       text(day.label, pad, y + 19, 20, "#788079");
-      o.sessions
-        .filter(
-          (s) =>
-            s.start < end &&
-            (s.end ?? o.now) > t &&
-            data.included.some((a) => a.id === s.activityId),
-        )
-        .forEach((s) => {
+      day.lanes.forEach((lane, laneIndex) => {
+        ctx.fillStyle = "#e9eae4";
+        ctx.fillRect(x, y + laneIndex * 28, w, 23);
+        for (const s of lane) {
           ctx.fillStyle = data.included.find(
             (a) => a.id === s.activityId,
           )!.color;
           ctx.fillRect(
             x + ((Math.max(s.start, t) - t) / (end - t)) * w,
-            y,
+            y + laneIndex * 28,
             Math.max(
               1,
               ((Math.min(s.end ?? o.now, end) - Math.max(s.start, t)) /
@@ -268,9 +291,11 @@ export async function exportChart(o: ExportOptions): Promise<Blob> {
             ),
             23,
           );
-        });
+        }
+      });
+      y += day.lanes.length * 28 + 10;
     });
-    legendY = 470 + data.days.length * 34;
+    legendY = y + 60;
   }
   if (kind === "ranking") {
     text(duration(data.total) + " tracked", pad, 310, 50, "#263b30", 600);

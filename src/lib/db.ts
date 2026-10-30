@@ -1,7 +1,8 @@
+import { legacyDisposition } from "./legacy-activities";
 import Dexie, { type Table } from "dexie";
 import {
-  defaults,
   validateSession,
+  isAgent,
   overlap,
   validateBackup,
   type Activity,
@@ -23,17 +24,43 @@ export class TrackerDB extends Dexie {
       activities: "id,order",
       sessions: "id,activityId,start",
     });
+    this.version(2)
+      .stores({ activities: "id,order", sessions: "id,activityId,start" })
+      .upgrade(async (tx) => {
+        const activities = await tx
+          .table<Activity, string>("activities")
+          .toArray();
+        const sessions = await tx.table<Session, string>("sessions").toArray();
+        for (const activity of activities) {
+          const disposition = legacyDisposition(activity, sessions);
+          if (disposition === "delete")
+            await tx.table("activities").delete(activity.id);
+          if (disposition === "archive")
+            await tx
+              .table("activities")
+              .update(activity.id, { archived: true });
+        }
+      });
   }
-  async seed() {
-    await this.transaction("rw", this.activities, async () => {
-      if ((await this.activities.count()) === 0)
-        await this.activities.bulkAdd(defaults);
-    });
-  }
-  async switchTo(activityId: string | null, now = Date.now()) {
+  async switchTo(
+    activityId: string | null,
+    now = Date.now(),
+    options: {
+      keepAsAgent?: boolean;
+      agentName?: string;
+      expectedFocusId?: string;
+    } = {},
+  ) {
     await this.transaction("rw", this.sessions, this.activities, async () => {
       const all = await this.sessions.toArray();
-      const active = all.filter((s) => s.end === null);
+      const active = all.filter((s) => s.end === null && !isAgent(s));
+      if (
+        options.expectedFocusId &&
+        !active.some((s) => s.id === options.expectedFocusId)
+      )
+        throw Error(
+          "Your focus changed in another tab. Close this sheet and choose again.",
+        );
       if (active.some((s) => s.start > now))
         throw Error(
           "The device clock moved backwards. Edit the running session before continuing.",
@@ -44,12 +71,39 @@ export class TrackerDB extends Dexie {
         if (!a || a.archived)
           throw Error("This activity is no longer available.");
       }
+      if (options.keepAsAgent && active.length && activityId) {
+        const previous = active[0];
+        const agentName = (options.agentName ?? "").trim();
+        if (agentName.length > 80)
+          throw Error("Agent names must be 80 characters or fewer.");
+        if (
+          all.some(
+            (s) =>
+              s.end === null &&
+              isAgent(s) &&
+              s.activityId === previous.activityId &&
+              (s.agentName ?? "") === agentName,
+          )
+        )
+          throw Error(
+            "An agent timer with this name is already running for that activity.",
+          );
+        await this.sessions.add({
+          id: crypto.randomUUID(),
+          activityId: previous.activityId,
+          start: now,
+          end: null,
+          notes: "",
+          mode: "agent",
+          agentName,
+        });
+      }
       for (const s of active) {
         if (now === s.start) await this.sessions.delete(s.id);
         else await this.sessions.update(s.id, { end: now });
       }
       if (activityId) {
-        if (all.some((s) => s.end !== null && s.end > now))
+        if (all.some((s) => !isAgent(s) && s.end !== null && s.end > now))
           throw Error(
             "A saved entry is in the future. Edit it before starting a timer.",
           );
@@ -59,8 +113,50 @@ export class TrackerDB extends Dexie {
           start: now,
           end: null,
           notes: "",
+          mode: "focus",
         });
       }
+    });
+  }
+  async startAgent(activityId: string, now = Date.now(), agentName = "") {
+    const name = agentName.trim();
+    if (name.length > 80)
+      throw Error("Agent names must be 80 characters or fewer.");
+    await this.transaction("rw", this.sessions, this.activities, async () => {
+      const activity = await this.activities.get(activityId);
+      if (!activity || activity.archived)
+        throw Error("Choose an available activity.");
+      if (
+        (await this.sessions.toArray()).some(
+          (s) =>
+            s.end === null &&
+            isAgent(s) &&
+            s.activityId === activityId &&
+            (s.agentName ?? "") === name,
+        )
+      )
+        return;
+      await this.sessions.add({
+        id: crypto.randomUUID(),
+        activityId,
+        start: now,
+        end: null,
+        mode: "agent",
+        agentName: name,
+        notes: "",
+      });
+    });
+  }
+  async stopSession(id: string, now = Date.now()) {
+    await this.transaction("rw", this.sessions, async () => {
+      const session = await this.sessions.get(id);
+      if (!session || session.end !== null) return;
+      if (now < session.start)
+        throw Error(
+          "The device clock moved backwards. Edit the session start before stopping.",
+        );
+      if (now === session.start) await this.sessions.delete(id);
+      else await this.sessions.update(id, { end: now });
     });
   }
   async saveSession(s: Session) {
@@ -73,11 +169,20 @@ export class TrackerDB extends Dexie {
       if (!(await this.activities.get(s.activityId)))
         throw Error("Choose an activity.");
       const all = await this.sessions.toArray();
-      if (all.some((x) => overlap(s, x, Math.max(Date.now(), s.end ?? 0))))
+      if (
+        !isAgent(s) &&
+        all.some(
+          (x) => !isAgent(x) && overlap(s, x, Math.max(Date.now(), s.end ?? 0)),
+        )
+      )
         throw Error(
           "This overlaps another session. Adjust the times or edit the conflicting entry first.",
         );
-      if (s.end === null && all.some((x) => x.end === null && x.id !== s.id))
+      if (
+        !isAgent(s) &&
+        s.end === null &&
+        all.some((x) => !isAgent(x) && x.end === null && x.id !== s.id)
+      )
         throw Error("Another timer is already running.");
       await this.sessions.put(s);
     });

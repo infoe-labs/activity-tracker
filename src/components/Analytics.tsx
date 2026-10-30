@@ -26,6 +26,7 @@ import {
   dateKey,
   dayStart,
   duration,
+  isAgent,
   type Activity,
   type Session,
 } from "../lib/model";
@@ -35,6 +36,7 @@ import {
   period,
   rangeLabel,
   trendRows,
+  patternLanes,
   type ChartKind,
   type RangeKey,
 } from "../lib/analytics";
@@ -55,6 +57,17 @@ export default function Analytics({
   sessions: Session[];
   now: number;
 }) {
+  const [scope, setScope] = useState<"focus" | "agent" | "combined">("focus");
+  const scopedSessions = sessions.filter(
+    (s) =>
+      scope === "combined" || (scope === "agent" ? isAgent(s) : !isAgent(s)),
+  );
+  const scopeLabel =
+    scope === "focus"
+      ? "Personal focus"
+      : scope === "agent"
+        ? "AI agent-hours"
+        : "Combined effort";
   const [range, setRange] = useState<RangeKey>("Last 7 days"),
     [bounds, setBounds] = useState<[number, number]>(() =>
       period("Last 7 days", now),
@@ -71,8 +84,8 @@ export default function Analytics({
   const [start, end] = bounds;
   const minute = Math.floor(now / 10000);
   const data = useMemo(
-    () => analyticsData(activities, sessions, start, end, now, excluded),
-    [activities, sessions, start, end, minute, excluded],
+    () => analyticsData(activities, scopedSessions, start, end, now, excluded),
+    [activities, sessions, start, end, minute, excluded, scope],
   );
   const label = rangeLabel(start, end);
   const trends = trendRows(data);
@@ -123,7 +136,8 @@ export default function Analytics({
                   : {}),
               }
             : data,
-        sessions,
+        sessions: scopedSessions,
+        scopeLabel,
         start,
         end,
         now,
@@ -251,7 +265,7 @@ export default function Analytics({
             </ResponsiveContainer>
             {!pie && (
               <div className="donut-center">
-                <span className="eyebrow">TIME WELL SPENT</span>
+                <span className="eyebrow">{scopeLabel.toUpperCase()}</span>
                 <strong>{duration(data.total)}</strong>
                 <small>{data.entries.length} activities, one life</small>
               </div>
@@ -412,6 +426,12 @@ export default function Analytics({
             {data.days.map((day) => {
               const t = day.timestamp,
                 e = addDays(t, 1);
+              const lanes = patternLanes(
+                scopedSessions.filter((s) => !excluded.has(s.activityId)),
+                t,
+                e,
+                now,
+              );
               return (
                 <div className="pattern-row" key={t}>
                   <span>
@@ -420,15 +440,9 @@ export default function Analytics({
                       day: "numeric",
                     })}
                   </span>
-                  <div>
-                    {sessions
-                      .filter(
-                        (s) =>
-                          !excluded.has(s.activityId) &&
-                          s.start < e &&
-                          (s.end ?? now) > t,
-                      )
-                      .map((s) => {
+                  <div style={{ height: lanes.length * 44 }}>
+                    {lanes.flatMap((lane, laneIndex) =>
+                      lane.map((s) => {
                         const a = activities.find((a) => a.id === s.activityId);
                         return (
                           <button
@@ -460,6 +474,7 @@ export default function Analytics({
                             }
                             style={{
                               background: a?.color,
+                              top: laneIndex * 44,
                               left:
                                 ((Math.max(t, s.start) - t) / (e - t)) * 100 +
                                 "%",
@@ -474,7 +489,8 @@ export default function Analytics({
                             }}
                           />
                         );
-                      })}
+                      }),
+                    )}
                   </div>
                 </div>
               );
@@ -520,6 +536,30 @@ export default function Analytics({
   }
   return (
     <>
+      <div className="analytics-scope">
+        <label>
+          Whose work?
+          <select
+            aria-label="Analytics tracking mode"
+            value={scope}
+            onChange={(e) => {
+              setScope(e.target.value as typeof scope);
+              setSelected(null);
+            }}
+          >
+            <option value="focus">My personal focus</option>
+            <option value="agent">AI agent work</option>
+            <option value="combined">Combined effort</option>
+          </select>
+        </label>
+        <p>
+          {scope === "focus"
+            ? "Your own time, without parallel agent work."
+            : scope === "agent"
+              ? "Agent-hours include work running in parallel."
+              : "Personal time plus agent-hours. Concurrent work adds effort, not elapsed calendar time."}
+        </p>
+      </div>
       <div className="analytics-toolbar">
         <div className="range-control">
           <select
@@ -604,7 +644,7 @@ export default function Analytics({
       )}
       <div className="analytics-stats">
         <div>
-          <span className="eyebrow">TRACKED TIME</span>
+          <span className="eyebrow">{scopeLabel.toUpperCase()}</span>
           <strong>{duration(data.total)}</strong>
         </div>
         <div>
@@ -790,7 +830,9 @@ export default function Analytics({
           <div className={"presentation-report presentation-" + expanded}>
             <div className="eyebrow">A LITTLE TIME, WELL SPENT</div>
             <h1>{chartTitles[expanded]}</h1>
-            <p className="presentation-date">{label}</p>
+            <p className="presentation-date">
+              {label} · {scopeLabel}
+            </p>
             {expanded !== "distribution" && (
               <div className="presentation-total">
                 {duration(data.total)} <span>tracked</span>
