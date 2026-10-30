@@ -168,6 +168,7 @@ export default function App() {
           : "The change could not be saved. Please try again.",
       );
     } finally {
+      setNow(Date.now());
       setBusy(false);
     }
   }
@@ -448,7 +449,7 @@ export default function App() {
                   )}
                 </div>
               </div>
-              {active && now < active.start && (
+              {active && Date.now() < active.start && (
                 <p role="alert">
                   Your clock changed. Edit this session to correct its start
                   time.
