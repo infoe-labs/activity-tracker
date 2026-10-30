@@ -192,3 +192,8 @@ use included effort in the selected mode. PNGs identify the accounting mode;
 JSON preserves mode/name metadata and CSV includes tracking-mode/agent columns.
 Older sessions without a mode remain personal focus. Backup schema version 1
 adds optional mode and agentName fields; readers validate both when present.
+
+To start with an empty list without losing history, use **Settings → Your activities
+→ Clear activity list**. Unused activities are deleted, referenced activities are
+archived, and running timers are preserved. Archived activities are hidden by
+default in Settings; use **Show archived activities** to inspect or restore them.

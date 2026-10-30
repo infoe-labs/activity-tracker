@@ -187,6 +187,18 @@ export class TrackerDB extends Dexie {
       await this.sessions.put(s);
     });
   }
+  async clearActivityList() {
+    await this.transaction("rw", this.activities, this.sessions, async () => {
+      const referenced = new Set(
+        (await this.sessions.toArray()).map((s) => s.activityId),
+      );
+      for (const activity of await this.activities.toArray()) {
+        if (referenced.has(activity.id))
+          await this.activities.update(activity.id, { archived: true });
+        else await this.activities.delete(activity.id);
+      }
+    });
+  }
   async restore(data: unknown) {
     const v = validateBackup(data);
     await this.transaction("rw", this.activities, this.sessions, async () => {
