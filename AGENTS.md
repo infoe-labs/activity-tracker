@@ -13,3 +13,8 @@
 - Use only the explicitly approved repository-local Git identity. Do not infer identity from GitHub login, global config or another repository.
 - Review staged contents and outgoing commit metadata before publishing. Keep privacy hooks local under .git/hooks.
 - Do not claim real iOS/Android installation was verified by Chromium automation.
+
+## Shared repository standards
+
+Read `docs/SHARED_STANDARDS.md` for the canonical infoe-labs guidelines.
+Preserve stronger project-specific privacy, review, test and release rules.

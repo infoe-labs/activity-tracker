@@ -1,6 +1,6 @@
-**Live app: [https://infoe-labs.github.io/activity-tracker/](https://infoe-labs.github.io/activity-tracker/)**
-
 # Still — Time well spent
+
+**Live site: [GitHub Pages](https://infoe-labs.github.io/activity-tracker/)**
 
 A calm, mobile-first productivity activity tracker. Start with one tap, choose how to switch, and see where your time goes. No account or backend required.
 
